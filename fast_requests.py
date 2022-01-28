@@ -1,5 +1,4 @@
 import time
-import functools
 from multiprocessing import cpu_count
 from concurrent.futures import as_completed
 from requests_futures.sessions import FuturesSession
@@ -21,20 +20,30 @@ def fast_requests(max_workers):
     """
     def decorator(f):
         # this is the actual decorator
-        @functools.wraps(f)
         def wrapped(urls, accept_codes, max_retry=3, rate_limit=(10, 1), **kwargs):
-            # kwargs for optional request header and params
+            """ sends (chunks of) parallel get/post requests, adhering to API limits
+            :param urls: list
+            :param accept_codes: list of API status codes that are acceptable
+            :param max_retry: in case of an error
+            :param rate_limit: tuple (number of requests, seconds)
+            :param kwargs: optional headers, params, data (list, same as urls)
+            """
             results = []
             n = rate_limit[0]  # chunk size
-            urls_chunks = [urls[i:i+n] for i in range(0, len(urls), n)]
+            chunks = [range(len(urls))[i:i+n] for i in range(0, len(urls), n)]
+            headers = kwargs.get('headers', None)
+            payload = kwargs.get('payload', [None]*len(urls))
+            data = kwargs.get('data', [None]*len(urls))
             with FuturesSession(max_workers=max_workers) as session:
                 chunk_idx = 0
                 trial = 0
-                while chunk_idx < len(urls_chunks):
+                while chunk_idx < len(chunks):
                     results_chunk = []
                     start = time.time()
                     # Future requests are run (in parallel) in the background
-                    futures = [f(session, url, **kwargs) for url in urls_chunks[chunk_idx]]
+                    futures = [f(session, urls[i],
+                                 headers=headers, params=payload[i],
+                                 data=data[i]) for i in chunks[chunk_idx]]
                     # ensure that responses came back before continuing (to not overload the API)
                     for future in as_completed(futures):
                         results_chunk.append(future.result())
@@ -63,31 +72,12 @@ def fast_requests(max_workers):
 
 @execution_timer
 @fast_requests(max_workers=cpu_count())
-def fast_get(session, url):
-    """ sends (chunks of) parallel get requests, adhering to API limits
-
-    params:
-        urls: list
-        accept_codes: list of status codes that are acceptable
-        max_retry: in case of an error
-        rate_limit: tuple (number of requests, seconds)
-        session is provided by the decorator
-    """
-    return session.get(url)
+def fast_get(session, url, **kwargs):
+    return session.get(url, kwargs)
 
 
 @execution_timer
 @fast_requests(max_workers=cpu_count())
-def fast_post(session, url, headers, payload, data):
-    """ sends (chunks of) parallel post requests, adhering to API limits
-
-    params:
-        urls: list
-        accept_codes: list of status codes that are acceptable
-        max_retry: in case of an error
-        rate_limit: tuple (number of requests, seconds)
-        headers, payload and data for post request
-        session is provided by the decorator
-    """
-    return session.post(url, headers=headers, params=payload, data=data)
+def fast_post(session, url, **kwargs):
+    return session.post(url, **kwargs)
 
