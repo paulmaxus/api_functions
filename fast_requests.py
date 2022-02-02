@@ -73,7 +73,7 @@ def fast_requests(max_workers):
 @execution_timer
 @fast_requests(max_workers=cpu_count())
 def fast_get(session, url, **kwargs):
-    return session.get(url, kwargs)
+    return session.get(url, **kwargs)
 
 
 @execution_timer
