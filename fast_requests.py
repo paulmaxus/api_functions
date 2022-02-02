@@ -20,19 +20,20 @@ def fast_requests(max_workers):
     """
     def decorator(f):
         # this is the actual decorator
-        def wrapped(urls, accept_codes, max_retry=3, rate_limit=(10, 1), **kwargs):
+        def wrapped(urls: str, params: list, accept_codes: list,
+                    max_retry: int = 3, rate_limit: tuple = (5, 1), **kwargs):
             """ sends (chunks of) parallel get/post requests, adhering to API limits
-            :param urls: list
+            :param urls
+            :param params: request parameters (list, len(params) == len(urls))
             :param accept_codes: list of API status codes that are acceptable
             :param max_retry: in case of an error
             :param rate_limit: tuple (number of requests, seconds)
-            :param kwargs: optional headers, params, data (list, same as urls)
+            :param kwargs: optional headers (dict), data (list, len(data) == len(params))
             """
             results = []
             n = rate_limit[0]  # chunk size
             chunks = [range(len(urls))[i:i+n] for i in range(0, len(urls), n)]
             headers = kwargs.get('headers', None)
-            payload = kwargs.get('payload', [None]*len(urls))
             data = kwargs.get('data', [None]*len(urls))
             with FuturesSession(max_workers=max_workers) as session:
                 chunk_idx = 0
@@ -42,7 +43,7 @@ def fast_requests(max_workers):
                     start = time.time()
                     # Future requests are run (in parallel) in the background
                     futures = [f(session, urls[i],
-                                 headers=headers, params=payload[i],
+                                 headers=headers, params=params[i],
                                  data=data[i]) for i in chunks[chunk_idx]]
                     # ensure that responses came back before continuing (to not overload the API)
                     for future in as_completed(futures):
