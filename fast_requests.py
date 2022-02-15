@@ -2,6 +2,7 @@ import time
 from multiprocessing import cpu_count
 from concurrent.futures import as_completed
 from requests_futures.sessions import FuturesSession
+from requests import ConnectionError
 
 
 def execution_timer(f):
@@ -39,6 +40,7 @@ def fast_requests(max_workers):
                     # Future requests are run (in parallel) in the background
                     futures = []
                     for req in chunks[chunk_idx]:
+                        # catch session errors
                         future = f(session, req['url'],
                                    headers=req.get('headers', None),
                                    params=req.get('params', None),
@@ -49,24 +51,36 @@ def fast_requests(max_workers):
                     for future in as_completed(futures):
                         results_chunk.append(future)
                         # note: results won't be in list order but in order of completion
-                    # wait the remaining time
-                    time.sleep(max(0, rate_limit[1] - (time.time() - start)))
                     # check for unexpected status codes
-                    status_codes = [future.result().status_code for future in results_chunk]
-                    if len(set(status_codes).difference(set(accept_codes))) != 0:
+                    # plus, .result() forwards ConnectionError
+                    api_error = 0
+                    try:
+                        results_temp = [(future.i, future.result()) for future in results_chunk]
+                        status_codes = [result[1].status_code for result in results_temp]
+                        if len(set(status_codes).difference(set(accept_codes))) != 0:
+                            api_error = 1
+                            print(f'unacceptable status codes: {status_codes}')
+                    except ConnectionError:
+                        api_error = 1
+                        print('connection error')
+                    if api_error:
                         if trial < max_retry:
                             # retry chunk, otherwise stop
                             trial += 1
-                            print('retrying after error')
+                            wait_secs = 30  # arbitrary wait time
+                            print(f'waiting {wait_secs} seconds before retrying')
+                            time.sleep(wait_secs)
                             continue
                         else:
                             # return results up to now and error messages
-                            return results, f'unacceptable status codes: {status_codes}'
+                            return results, 'api error'
                     else:
-                        for future in results_chunk:
-                            results[future.i] = future.result()
+                        for result in results_temp:
+                            results[result[0]] = result[1]
                         chunk_idx += 1  # next chunk
                         trial = 0  # reset trial when success
+                        # wait the remaining time
+                        time.sleep(max(0, rate_limit[1] - (time.time() - start)))
             return results, 'success'
         return wrapped
     return decorator
